@@ -1,0 +1,13 @@
+[project]
+name = "myzone-track"
+version = "0.1.0"
+description = "Unofficial Python client for the Myzone Moves dashboard"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "curl-cffi>=0.13.0",
+    "python-dotenv>=1.1.1",
+]
+
+[tool.uv]
+package = false

@@ -30,7 +30,11 @@ PAYLOAD = {
     "challenge_snapshot": {"data": []},
     "goals": {"target": "1300", "current": "73"},
     "questions": {"questions": []},
-    "previous_moves": {"data": {"moves": []}},
+    "previous_moves": {"data": {"moves": [{"meps": "999", "uGUID": "other"}]}},
+    "account_totals": {
+        "data": [{"meps": "73", "uGUID": "self"}],
+        "totalData": {"moves": 1, "meps": 73, "calories": 386, "duration": 56},
+    },
     "friends": {"friends": [{"guid": "uli", "fullname": "Uli Kramer", "status": 2}]},
     "friend_data": {
         "uli": {
@@ -39,6 +43,7 @@ PAYLOAD = {
                 "data": [
                     {
                         "timestamp": 1787727006,
+                        "isoDate": "2026-08-26",
                         "meps": "57",
                         "calories": "332",
                         "duration": "96",
@@ -92,6 +97,10 @@ async def test_setup_creates_history_capable_sensors(hass, enable_custom_integra
         == "Workout"
     )
     assert hass.states.get("sensor.myzone_uli_kramer_latest_meps").state == "57"
+    assert hass.states.get("sensor.myzone_total_meps").state == "73"
+    assert hass.states.get("sensor.myzone_total_workouts").state == "1"
+    assert hass.states.get("sensor.myzone_uli_kramer_monthly_meps").state == "57"
+    assert hass.states.get("sensor.myzone_uli_kramer_total_workouts").state == "1"
 
 
 async def test_config_flow_validates_credentials(hass, enable_custom_integrations):

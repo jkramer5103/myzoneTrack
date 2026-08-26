@@ -130,6 +130,7 @@ class MyzoneClient:
             "overtime": self.get("/sessioncalls/overtime/"),
             "latest_move": self.get("/sessioncalls/latestmove/"),
             "previous_moves": self.get("/sessioncalls/previousmoves/"),
+            "account_totals": self.moves_by_range(date(1970, 1, 1), day),
             "move_calendar": self.get(
                 "/sessioncalls/movecalendar/", {"year": day.year, "month": day.month}
             ),

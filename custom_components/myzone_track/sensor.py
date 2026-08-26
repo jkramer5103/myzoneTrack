@@ -16,6 +16,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -51,9 +52,13 @@ def _workouts(data: dict) -> int:
     )
 
 
-def _previous_moves(data: dict) -> list[dict]:
-    moves = data.get("previous_moves", {}).get("data", {}).get("moves", [])
+def _account_moves(data: dict) -> list[dict]:
+    moves = data.get("account_totals", {}).get("data", [])
     return moves if isinstance(moves, list) else []
+
+
+def _account_total(data: dict, key: str) -> Any:
+    return data.get("account_totals", {}).get("totalData", {}).get(key)
 
 
 def _leaderboard(data: dict) -> list[dict]:
@@ -186,49 +191,35 @@ SENSORS = (
     MyzoneSensorDescription(
         key="workout_history",
         translation_key="workout_history",
-        value_fn=lambda d: len(_previous_moves(d)),
-        attrs_fn=lambda d: {"workouts": _previous_moves(d)[:10]},
+        value_fn=lambda d: _number(_account_total(d, "moves")) or 0,
+        attrs_fn=lambda d: {"workouts": _account_moves(d)[:10]},
     ),
     MyzoneSensorDescription(
         key="total_meps",
         translation_key="total_meps",
         native_unit_of_measurement="MEPs",
         state_class=SensorStateClass.TOTAL,
-        value_fn=lambda d: sum(_number(m.get("meps")) or 0 for m in _previous_moves(d)),
+        value_fn=lambda d: _number(_account_total(d, "meps")) or 0,
     ),
     MyzoneSensorDescription(
         key="total_calories",
         translation_key="total_calories",
         native_unit_of_measurement="kcal",
         state_class=SensorStateClass.TOTAL,
-        value_fn=lambda d: sum(
-            _number(m.get("calories")) or 0 for m in _previous_moves(d)
-        ),
+        value_fn=lambda d: _number(_account_total(d, "calories")) or 0,
     ),
     MyzoneSensorDescription(
         key="total_workout_minutes",
         translation_key="total_workout_minutes",
         native_unit_of_measurement=UnitOfTime.MINUTES,
         state_class=SensorStateClass.TOTAL,
-        value_fn=lambda d: sum(
-            _number(m.get("duration")) or 0 for m in _previous_moves(d)
-        ),
+        value_fn=lambda d: _number(_account_total(d, "duration")) or 0,
     ),
     MyzoneSensorDescription(
         key="friends",
         translation_key="friends",
         value_fn=lambda d: len(d.get("friends", {}).get("friends", [])),
         attrs_fn=lambda d: {"friends": d.get("friends", {}).get("friends", [])},
-    ),
-    MyzoneSensorDescription(
-        key="leaderboard_score",
-        translation_key="leaderboard_score",
-        native_unit_of_measurement="MEPs",
-        value_fn=lambda d: next(
-            (_number(row.get("score")) for row in _leaderboard(d) if row.get("me")),
-            None,
-        ),
-        attrs_fn=lambda d: {"leaderboard": _leaderboard(d)},
     ),
     MyzoneSensorDescription(
         key="leaderboard_rank",
@@ -260,6 +251,10 @@ async def async_setup_entry(
 ) -> None:
     """Create sensors for a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    registry = er.async_get(hass)
+    obsolete_unique_id = f"{entry.unique_id or entry.entry_id}_leaderboard_score"
+    if entity_id := registry.async_get_entity_id("sensor", DOMAIN, obsolete_unique_id):
+        registry.async_remove(entity_id)
     entities: list[SensorEntity] = [
         MyzoneSensor(coordinator, entry, description) for description in SENSORS
     ]
@@ -277,6 +272,10 @@ async def async_setup_entry(
                     "average_heart_rate",
                     "peak_heart_rate",
                     "time_in_zone",
+                    "total_meps",
+                    "monthly_meps",
+                    "total_workouts",
+                    "monthly_workouts",
                 )
             )
     async_add_entities(entities)
@@ -322,7 +321,10 @@ class MyzoneFriendSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
         super().__init__(coordinator)
         self.guid, self.key = guid, key
         self.friend_name = profile.get("fullname") or profile.get("name") or guid
-        self._attr_name = f"Myzone {self.friend_name} latest {key.replace('_', ' ')}"
+        qualifier = "" if key.startswith(("total_", "monthly_")) else "latest "
+        self._attr_name = (
+            f"Myzone {self.friend_name} {qualifier}{key.replace('_', ' ')}"
+        )
         self._attr_unique_id = (
             f"{entry.unique_id or entry.entry_id}_friend_{guid}_{key}"
         )
@@ -334,6 +336,8 @@ class MyzoneFriendSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
         )
         units = {
             "meps": "MEPs",
+            "total_meps": "MEPs",
+            "monthly_meps": "MEPs",
             "calories": "kcal",
             "duration": UnitOfTime.MINUTES,
             "time_in_zone": UnitOfTime.MINUTES,
@@ -344,6 +348,8 @@ class MyzoneFriendSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
         self._attr_native_unit_of_measurement = units.get(key)
         if key == "workout":
             self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        if key in {"total_meps", "monthly_meps", "total_workouts", "monthly_workouts"}:
+            self._attr_state_class = SensorStateClass.TOTAL
 
     def _move(self) -> dict:
         payload = (
@@ -353,6 +359,23 @@ class MyzoneFriendSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
         )
         moves = payload.get("data", [])
         return moves[0] if isinstance(moves, list) and moves else {}
+
+    def _moves(self) -> list[dict]:
+        payload = (
+            self.coordinator.data.get("friend_data", {})
+            .get(self.guid, {})
+            .get("moves", {})
+        )
+        moves = payload.get("data", [])
+        return moves if isinstance(moves, list) else []
+
+    def _monthly_moves(self) -> list[dict]:
+        prefix = datetime.now(UTC).strftime("%Y-%m-")
+        return [
+            move
+            for move in self._moves()
+            if str(move.get("isoDate", "")).startswith(prefix)
+        ]
 
     @property
     def native_value(self) -> Any:
@@ -373,6 +396,14 @@ class MyzoneFriendSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
                 if timestamp is not None
                 else None
             )
+        if self.key == "total_meps":
+            return sum(_number(item.get("meps")) or 0 for item in self._moves())
+        if self.key == "monthly_meps":
+            return sum(_number(item.get("meps")) or 0 for item in self._monthly_moves())
+        if self.key == "total_workouts":
+            return len(self._moves())
+        if self.key == "monthly_workouts":
+            return len(self._monthly_moves())
         return _number(move.get(fields.get(self.key)))
 
     @property

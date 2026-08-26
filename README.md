@@ -11,11 +11,11 @@ workout and progress data as native sensors.
   heart rate, and time in zone
 - Monthly MEP and workout totals
 - Notifications, challenges, questions, and food-entry counts
-- Recent workout history with aggregate MEPs, calories, and duration
-- Friend count and leaderboard position/score
+- Account-only lifetime workout count, MEPs, calories, and duration
+- Friend count and monthly leaderboard position
 - Weight and height from the account's biometrics
 - A separate Home Assistant device for every friend sharing workout data, with
-  latest workout time, MEPs, calories, duration, effort, heart rate, and zone time
+  latest workout metrics plus separate monthly and lifetime MEP/workout totals
 - Full latest-workout, monthly graph, calendar, goal, challenge, question, and
   food payloads retained as sensor attributes
 - Five-minute shared polling coordinator

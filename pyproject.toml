@@ -11,3 +11,11 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[tool.setuptools]
+py-modules = ["myzone"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests", "test_myzone.py"]

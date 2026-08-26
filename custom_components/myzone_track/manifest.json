@@ -1,0 +1,12 @@
+{
+  "codeowners": ["@jkramer5103"],
+  "config_flow": true,
+  "documentation": "https://github.com/jkramer5103/myzoneTrack",
+  "domain": "myzone_track",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/jkramer5103/myzoneTrack/issues",
+  "name": "Myzone Track",
+  "requirements": ["curl-cffi==0.16.2"],
+  "version": "1.0.0"
+}

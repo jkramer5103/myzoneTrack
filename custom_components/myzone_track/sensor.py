@@ -51,6 +51,22 @@ def _workouts(data: dict) -> int:
     )
 
 
+def _previous_moves(data: dict) -> list[dict]:
+    moves = data.get("previous_moves", {}).get("data", {}).get("moves", [])
+    return moves if isinstance(moves, list) else []
+
+
+def _leaderboard(data: dict) -> list[dict]:
+    rows = data.get("leaderboard", {}).get("data", [])
+    if isinstance(rows, dict):
+        rows = rows.get("data", [])
+    return rows if isinstance(rows, list) else []
+
+
+def _biometric(data: dict, key: str) -> Any:
+    return data.get("biometrics", {}).get("biometrics", {}).get(key)
+
+
 @dataclass(frozen=True, kw_only=True)
 class MyzoneSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], Any]
@@ -167,6 +183,75 @@ SENSORS = (
         ),
         attrs_fn=lambda d: d.get("food_calendar", {}),
     ),
+    MyzoneSensorDescription(
+        key="workout_history",
+        translation_key="workout_history",
+        value_fn=lambda d: len(_previous_moves(d)),
+        attrs_fn=lambda d: {"workouts": _previous_moves(d)[:10]},
+    ),
+    MyzoneSensorDescription(
+        key="total_meps",
+        translation_key="total_meps",
+        native_unit_of_measurement="MEPs",
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda d: sum(_number(m.get("meps")) or 0 for m in _previous_moves(d)),
+    ),
+    MyzoneSensorDescription(
+        key="total_calories",
+        translation_key="total_calories",
+        native_unit_of_measurement="kcal",
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda d: sum(
+            _number(m.get("calories")) or 0 for m in _previous_moves(d)
+        ),
+    ),
+    MyzoneSensorDescription(
+        key="total_workout_minutes",
+        translation_key="total_workout_minutes",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda d: sum(
+            _number(m.get("duration")) or 0 for m in _previous_moves(d)
+        ),
+    ),
+    MyzoneSensorDescription(
+        key="friends",
+        translation_key="friends",
+        value_fn=lambda d: len(d.get("friends", {}).get("friends", [])),
+        attrs_fn=lambda d: {"friends": d.get("friends", {}).get("friends", [])},
+    ),
+    MyzoneSensorDescription(
+        key="leaderboard_score",
+        translation_key="leaderboard_score",
+        native_unit_of_measurement="MEPs",
+        value_fn=lambda d: next(
+            (_number(row.get("score")) for row in _leaderboard(d) if row.get("me")),
+            None,
+        ),
+        attrs_fn=lambda d: {"leaderboard": _leaderboard(d)},
+    ),
+    MyzoneSensorDescription(
+        key="leaderboard_rank",
+        translation_key="leaderboard_rank",
+        value_fn=lambda d: next(
+            (index for index, row in enumerate(_leaderboard(d), 1) if row.get("me")),
+            None,
+        ),
+    ),
+    MyzoneSensorDescription(
+        key="weight",
+        translation_key="weight",
+        native_unit_of_measurement="kg",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: _number(_biometric(d, "weight")),
+    ),
+    MyzoneSensorDescription(
+        key="height",
+        translation_key="height",
+        native_unit_of_measurement="cm",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: _number(_biometric(d, "height")),
+    ),
 )
 
 
@@ -175,9 +260,26 @@ async def async_setup_entry(
 ) -> None:
     """Create sensors for a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
+    entities: list[SensorEntity] = [
         MyzoneSensor(coordinator, entry, description) for description in SENSORS
-    )
+    ]
+    for guid, friend_data in coordinator.data.get("friend_data", {}).items():
+        profile = friend_data.get("profile", {})
+        if friend_data.get("moves"):
+            entities.extend(
+                MyzoneFriendSensor(coordinator, entry, guid, profile, key)
+                for key in (
+                    "workout",
+                    "meps",
+                    "calories",
+                    "duration",
+                    "effort",
+                    "average_heart_rate",
+                    "peak_heart_rate",
+                    "time_in_zone",
+                )
+            )
+    async_add_entities(entities)
 
 
 class MyzoneSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
@@ -209,3 +311,70 @@ class MyzoneSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
     def extra_state_attributes(self) -> dict | None:
         fn = self.entity_description.attrs_fn
         return fn(self.coordinator.data) if fn else None
+
+
+class MyzoneFriendSensor(CoordinatorEntity[MyzoneCoordinator], SensorEntity):
+    """A metric from a friend's latest shared workout."""
+
+    _attr_has_entity_name = False
+
+    def __init__(self, coordinator, entry, guid: str, profile: dict, key: str) -> None:
+        super().__init__(coordinator)
+        self.guid, self.key = guid, key
+        self.friend_name = profile.get("fullname") or profile.get("name") or guid
+        self._attr_name = f"Myzone {self.friend_name} latest {key.replace('_', ' ')}"
+        self._attr_unique_id = (
+            f"{entry.unique_id or entry.entry_id}_friend_{guid}_{key}"
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"friend_{guid}")},
+            name=f"Myzone {self.friend_name}",
+            manufacturer="Myzone",
+            model="Shared friend profile",
+        )
+        units = {
+            "meps": "MEPs",
+            "calories": "kcal",
+            "duration": UnitOfTime.MINUTES,
+            "time_in_zone": UnitOfTime.MINUTES,
+            "effort": PERCENTAGE,
+            "average_heart_rate": "bpm",
+            "peak_heart_rate": "bpm",
+        }
+        self._attr_native_unit_of_measurement = units.get(key)
+        if key == "workout":
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def _move(self) -> dict:
+        payload = (
+            self.coordinator.data.get("friend_data", {})
+            .get(self.guid, {})
+            .get("moves", {})
+        )
+        moves = payload.get("data", [])
+        return moves[0] if isinstance(moves, list) and moves else {}
+
+    @property
+    def native_value(self) -> Any:
+        move = self._move()
+        fields = {
+            "meps": "meps",
+            "calories": "calories",
+            "duration": "duration",
+            "effort": "avgEffortValue",
+            "average_heart_rate": "avgHR",
+            "peak_heart_rate": "peakHR",
+            "time_in_zone": "timeInZone",
+        }
+        if self.key == "workout":
+            timestamp = _number(move.get("timestamp"))
+            return (
+                datetime.fromtimestamp(timestamp, UTC)
+                if timestamp is not None
+                else None
+            )
+        return _number(move.get(fields.get(self.key)))
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        return self._move() if self.key == "workout" else None

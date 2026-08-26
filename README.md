@@ -45,10 +45,10 @@ UI.
 
 ## Python client
 
-Protocol and authentication code now lives in the private, Python-only
+Protocol and authentication code now lives in the public, Python-only
 [`myzoneAPI`](https://github.com/jkramer5103/myzoneAPI) repository. This
-integration consumes that module directly; it is not a REST service. Access to
-the private dependency is required when installing from source.
+integration vendors a pinned snapshot of that module so HACS installs remain
+self-contained; it is not a REST service and needs no separate setup.
 
 ## Development
 

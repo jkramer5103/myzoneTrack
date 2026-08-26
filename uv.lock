@@ -155,25 +155,17 @@ wheels = [
 ]
 
 [[package]]
-name = "myzone-api"
-version = "1.0.0"
-source = { git = "https://github.com/jkramer5103/myzoneAPI.git?rev=43a4753e272137ce37ce108a65ce5fed976ad267#43a4753e272137ce37ce108a65ce5fed976ad267" }
-dependencies = [
-    { name = "curl-cffi" },
-]
-
-[[package]]
 name = "myzone-track"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "myzone-api" },
+    { name = "curl-cffi" },
     { name = "python-dotenv" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "myzone-api", git = "https://github.com/jkramer5103/myzoneAPI.git?rev=43a4753e272137ce37ce108a65ce5fed976ad267" },
+    { name = "curl-cffi", specifier = ">=0.13.0" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
 ]
 
